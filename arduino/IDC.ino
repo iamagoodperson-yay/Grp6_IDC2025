@@ -14,20 +14,30 @@
 CytronMD motorL(PWM_PWM, 3, 9);
 CytronMD motorR(PWM_PWM, 10, 11);
 
-int mainSpeed = 127;
+int mainSpeed = 191;
   
 void setup() {
   pinMode(left_ir, INPUT);
   pinMode(right_ir, INPUT);
   Serial.begin(9600);
+  delay(10);
 }
 
-void move(int ms, int speed = mainSpeed) {
-  motorL.setSpeed(speed);
-  motorR.setSpeed(speed);
+void move(float sec, int speed = mainSpeed) {
+  double stop_time = millis() + abs(sec) * 1000;
+  if (sec > 0) {
+    motorL.setSpeed(speed);
+    motorR.setSpeed(speed);
+  } else {
+    motorL.setSpeed(-speed);
+    motorR.setSpeed(-speed);
+  }
+  while (millis() < stop_time) {}
+  motorL.setSpeed(0);
+  motorL.setSpeed(0);
 }
 
-void spotTurn(int ms, int direction, int speed = mainSpeed) {
+void spotTurn(float sec, int direction, int speed = mainSpeed) {
   if (direction == right) {
     motorL.setSpeed(speed);
     motorR.setSpeed(-speed);
@@ -47,50 +57,139 @@ void curveTurn(int curve, int speed = mainSpeed) {
   }
 }
 
-void noobLineTrace() {
-  int left_read = analogRead(left_ir);
-  int right_read = analogRead(right_ir);
+void oneSensorLineTrace(int type, int side, float sec = 0, int speed = mainSpeed) {
+  float kp = 0.6;
+  float kd = -0.005;
+  float prev_error = 0;
 
-  bool left_white = left_read < 500;
-  bool right_white = right_read < 500;
+  int left_read = 0, right_read = 0, error;
+  float pid_error;
+  if (type == timing) {
+    double stop_time = millis() + sec * 1000;
 
-  if (left_white && right_white) {
-    move(0);
-  } else if (!left_white && right_white) {
-    spotTurn(0, left);
-  } else if (left_white && !right_white) {
-    spotTurn(0, right);
+    if (side == right) {
+      while (millis() < stop_time) {
+        left_read = analogRead(left_ir);
+        right_read = analogRead(right_ir);
+        // Serial.print(left_read);
+        // Serial.print(" ");
+        // Serial.println(right_read);
+
+        error = right_read - 400;
+        pid_error = error * kp + (error - prev_error) * kd;
+
+        curveTurn(pid_error);
+
+        prev_error = error;
+      }
+    } else if (side == left) {
+      while (millis() < stop_time) {
+        left_read = analogRead(left_ir);
+        right_read = analogRead(right_ir);
+        // Serial.print(left_read);
+        // Serial.print(" ");
+        // Serial.println(right_read);
+
+        error = 400 - left_read;
+        pid_error = error * kp + (error - prev_error) * kd;
+
+        curveTurn(pid_error);
+
+        prev_error = error;
+      }
+    }
+  } else if (type == junction) {
+    if (side == right) {
+      while (left_read < 800) {
+        left_read = analogRead(left_ir);
+        right_read = analogRead(right_ir);
+        // Serial.print(left_read);
+        // Serial.print(" ");
+        // Serial.println(right_read);
+
+        error = right_read - 400;
+        pid_error = error * kp + (error - prev_error) * kd;
+
+        curveTurn(pid_error);
+
+        prev_error = error;
+      }
+    } else if (side == left) {
+      while (right_read < 800) {
+        left_read = analogRead(left_ir);
+        right_read = analogRead(right_ir);
+        // Serial.print(left_read);
+        // Serial.print(" ");
+        // Serial.println(right_read);
+
+        error = 400 - left_read;
+        pid_error = error * kp + (error - prev_error) * kd;
+
+        curveTurn(pid_error);
+
+        prev_error = error;
+      }
+    }
   }
+  move(0,0);
 }
 
-void pidLineTrace(int sec, int speed = mainSpeed) {
-  float kp = 0.10; // fixed
-  float kd = 0.005; // adjust as needed by ±0.005 increments
+void twoSensorLineTrace(int opt, float sec = 0, int speed = mainSpeed) {
+  float kp = 0.1;
+  float kd = -0.015;
   float prev_error = 0;
-  double stop_time = millis() + sec * 1000;
 
-  int left_read, right_read, error;
+  int left_read = 0, right_read = 0, error;
   float pid_error;
 
-  while (millis() < stop_time) {
-    left_read = analogRead(left_ir);
-    right_read = analogRead(right_ir);
-    // Serial.print(left_read);
-    // Serial.print(" ");
-    // Serial.println(right_read);
+  if (opt == timing) {
+    double stop_time = millis() + sec * 1000;
 
-    error = right_read - left_read;
-    pid_error = error * kp + (error - prev_error) * kd;
-    // Serial.print(error);
-    // Serial.print(" ");
-    // Serial.println(pid_error);
+    while (millis() < stop_time) {
+      left_read = analogRead(left_ir);
+      right_read = analogRead(right_ir);
+      // Serial.print(left_read);
+      // Serial.print(" ");
+      // Serial.println(right_read);
 
-    curveTurn(pid_error);
+      error = right_read - left_read;
+      pid_error = error * kp + (error - prev_error) * kd;
 
-    prev_error = error;
+      curveTurn(pid_error);
+
+      prev_error = error;
+    }
+  } else if (opt == junction) {
+    while (left_read < 800 || right_read < 800) {
+      left_read = analogRead(left_ir);
+      right_read = analogRead(right_ir);
+      // Serial.print(left_read);
+      // Serial.print(" ");
+      // Serial.println(right_read);
+
+      error = right_read - left_read;
+      pid_error = error * kp + (error - prev_error) * kd;
+
+      curveTurn(pid_error);
+
+      prev_error = error;
+    }
   }
+  move(0,0);
 }
+
+void autoTurnLeft() {
+  oneSensorLineTrace(timing, left, 0.5);
+  oneSensorLineTrace(junction, left);
+  oneSensorLineTrace(timing, left, 0.1);
+  twoSensorLineTrace(junction, 0, 64);
+}
+
+int run = 0;
   
 void loop() {
-  pidLineTrace(100);
+  if (run == 0) {
+    autoTurnLeft();
+    run = 1;
+  }
 }
